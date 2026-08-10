@@ -1,0 +1,18 @@
+body {
+  background: #111;
+  color: #eee;
+  font-family: sans-serif;
+  text-align: center;
+  padding: 10px;
+}
+
+canvas {
+  background: #1a1a1a;
+  border: 1px solid #444;
+  max-width: 100%;
+}
+
+.hint {
+  color: #999;
+  font-size: 0.85em;
+}
