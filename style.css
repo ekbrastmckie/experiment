@@ -1,3 +1,18 @@
 /* style.css
    Visual styling for the page shell (layout, canvas sizing, theme).
    Does not contain game logic. */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;      /* no scrollbars around the canvas */
+  background: #111;
+}
+
+#board {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}

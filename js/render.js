@@ -56,19 +56,49 @@ function resizeCanvas() {
   canvas.height = canvas.clientHeight;
 }
 
-// grid coords -> screen coords (standard 2:1 isometric projection)
-function toScreen(x, y, z) {
-  const originX = canvas.width / 2;
-  const originY = 100;
-  const screenX = originX + (x - y) * (TILE_WIDTH / 2);
-  const screenY = originY + (x + y) * (TILE_HEIGHT / 2) - z * TILE_DEPTH;
+// grid coords -> screen coords, BEFORE centering/scaling.
+// (x - y) and (x + y) is the standard 2:1 isometric projection.
+function toIsoUnscaled(x, y, z) {
+  const screenX = (x - y) * (TILE_WIDTH / 2);
+  const screenY = (x + y) * (TILE_HEIGHT / 2) - z * TILE_DEPTH;
   return { screenX, screenY };
 }
+
+// Finds the bounding box (in unscaled iso space) of a sizeX*sizeY*sizeZ
+// grid by checking all 8 corners of the cuboid — the projection is
+// linear per-axis, so extremes always land on a corner.
+function computeIsoBounds(sizeX, sizeY, sizeZ) {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const x of [0, sizeX]) {
+    for (const y of [0, sizeY]) {
+      for (const z of [0, sizeZ]) {
+        const { screenX, screenY } = toIsoUnscaled(x, y, z);
+        minX = Math.min(minX, screenX);
+        maxX = Math.max(maxX, screenX);
+        minY = Math.min(minY, screenY);
+        maxY = Math.max(maxY, screenY);
+      }
+    }
+  }
+  // pad by one tile's footprint since tiles are drawn as diamonds
+  // centered on these coordinates, not points.
+  return {
+    minX: minX - TILE_WIDTH / 2,
+    maxX: maxX + TILE_WIDTH / 2,
+    minY: minY - TILE_HEIGHT / 2,
+    maxY: maxY + TILE_HEIGHT / 2
+  };
+}
+
+const FIT_PADDING = 0.9;  // leave a 10% margin around the grid
+const MAX_SCALE = 4;      // don't blow tiles up absurdly for tiny grids
 
 /* renderGrid: draws every non-empty piece in a 3D array
    grid[x][y][z] = { type, temperature, ... }
    Draws back-to-front, bottom-to-top so nearer/higher pieces
-   correctly cover farther/lower ones (painter's algorithm). */
+   correctly cover farther/lower ones (painter's algorithm).
+   Auto-fits and centers the whole grid to the current canvas size,
+   however large or small the grid or canvas turn out to be. */
 export function renderGrid(grid) {
   if (!ctx) throw new Error('renderGrid: call initRenderer() first');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -76,6 +106,25 @@ export function renderGrid(grid) {
   const sizeX = grid.length;
   const sizeY = grid[0].length;
   const sizeZ = grid[0][0].length;
+
+  const bounds = computeIsoBounds(sizeX, sizeY, sizeZ);
+  const boundsWidth = bounds.maxX - bounds.minX;
+  const boundsHeight = bounds.maxY - bounds.minY;
+
+  const scale = Math.min(
+    (canvas.width / boundsWidth) * FIT_PADDING,
+    (canvas.height / boundsHeight) * FIT_PADDING,
+    MAX_SCALE
+  );
+
+  const centerX = (bounds.minX + bounds.maxX) / 2;
+  const centerY = (bounds.minY + bounds.maxY) / 2;
+
+  ctx.save();
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.scale(scale, scale);
+  ctx.translate(-centerX, -centerY);
+  ctx.lineWidth = 1 / scale; // keep tile outlines crisp at any scale
 
   for (let z = 0; z < sizeZ; z++) {
     const maxSum = (sizeX - 1) + (sizeY - 1);
@@ -89,10 +138,12 @@ export function renderGrid(grid) {
       }
     }
   }
+
+  ctx.restore();
 }
 
 function drawTile(x, y, z, piece) {
-  const { screenX, screenY } = toScreen(x, y, z);
+  const { screenX, screenY } = toIsoUnscaled(x, y, z);
   const color = PIECE_COLORS[piece.type] || '#ff00ff';
 
   ctx.beginPath();
