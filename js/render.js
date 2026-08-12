@@ -1,5 +1,5 @@
 /* render.js
-   GUI/display layer: isometric drawing of the gamespace grid to
+   GUI/display layer: isometric drawing of the board grid to
    the canvas, plus a DOM-based window/menu overlay system.
    Reads grid state, never mutates it.
 
@@ -9,12 +9,19 @@
       of the canvas (for accessibility: screen readers, keyboard
       nav, zoom all work for free this way).
 
-   Usage from main.js (once it exists):
+   Colors come from board.js's PIECE_TYPES registry (single source
+   of truth for what a piece type looks like) — render.js no longer
+   keeps its own duplicate color table.
+
+   Usage from main.js:
      import { initRenderer, renderGrid, createWindow } from './render.js';
+     import { createBoard } from './board.js';
      initRenderer('board');
-     renderGrid(grid);              // grid = gamespace.js's 3D array
+     renderGrid(createBoard(8, 8, 8, 'stone'));
      createWindow({ title: 'Stats', content: '<p>Tick: 0</p>' });
 */
+
+import { PIECE_TYPES } from './board.js';
 
 // ---------------------------------------------------------------
 // 1. Canvas isometric grid renderer
@@ -26,19 +33,6 @@ let ctx = null;
 const TILE_WIDTH = 64;   // horizontal footprint of one tile, in px
 const TILE_HEIGHT = 32;  // vertical footprint of one tile, in px
 const TILE_DEPTH = 32;   // px shifted upward per height (z) level
-
-// Placeholder colors until pieces.js defines the real registry.
-// Unknown types render magenta so missing entries are obvious, not silent.
-const PIECE_COLORS = {
-  magma: '#ff4500',
-  stone: '#808080',
-  water: '#1e90ff',
-  ice:   '#b3e5fc',
-  steam: '#f5f5f5',
-  air:   '#e0f7fa',
-  smoke: '#616161',
-  fire:  '#ff6f00'
-};
 
 export function initRenderer(canvasId) {
   canvas = document.getElementById(canvasId);
@@ -81,31 +75,36 @@ function computeIsoBounds(sizeX, sizeY, sizeZ) {
     }
   }
   // pad by one tile's footprint since tiles are drawn as diamonds
-  // centered on these coordinates, not points.
+  // centered on these coordinates, not points. maxY gets extra
+  // padding equal to TILE_DEPTH since each piece now draws as a
+  // full cube — its side faces hang down below the top diamond,
+  // so the lowest layer's cube bottoms need room too.
   return {
     minX: minX - TILE_WIDTH / 2,
     maxX: maxX + TILE_WIDTH / 2,
     minY: minY - TILE_HEIGHT / 2,
-    maxY: maxY + TILE_HEIGHT / 2
+    maxY: maxY + TILE_HEIGHT / 2 + TILE_DEPTH
   };
 }
 
 const FIT_PADDING = 0.9;  // leave a 10% margin around the grid
 const MAX_SCALE = 4;      // don't blow tiles up absurdly for tiny grids
 
-/* renderGrid: draws every non-empty piece in a 3D array
-   grid[x][y][z] = { type, temperature, ... }
+/* renderGrid: draws every piece in a 3D board array
+   board[x][y][z] = { type, temperature, ... }
    Draws back-to-front, bottom-to-top so nearer/higher pieces
    correctly cover farther/lower ones (painter's algorithm).
    Auto-fits and centers the whole grid to the current canvas size,
-   however large or small the grid or canvas turn out to be. */
-export function renderGrid(grid) {
+   however large or small the grid or canvas turn out to be.
+   A piece whose type isn't in board.js's PIECE_TYPES registry
+   renders magenta, so a bad/missing entry is obvious, not silent. */
+export function renderGrid(board) {
   if (!ctx) throw new Error('renderGrid: call initRenderer() first');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  const sizeX = grid.length;
-  const sizeY = grid[0].length;
-  const sizeZ = grid[0][0].length;
+  const sizeX = board.length;
+  const sizeY = board[0].length;
+  const sizeZ = board[0][0].length;
 
   const bounds = computeIsoBounds(sizeX, sizeY, sizeZ);
   const boundsWidth = bounds.maxX - bounds.minX;
@@ -132,8 +131,8 @@ export function renderGrid(grid) {
       for (let x = 0; x <= sum; x++) {
         const y = sum - x;
         if (x >= sizeX || y >= sizeY) continue;
-        const piece = grid[x][y][z];
-        if (!piece || piece.type === 'empty') continue;
+        const piece = board[x][y][z];
+        if (!piece) continue;
         drawTile(x, y, z, piece);
       }
     }
@@ -142,20 +141,69 @@ export function renderGrid(grid) {
   ctx.restore();
 }
 
+// Multiplies a '#rrggbb' color by a brightness factor (e.g. 0.6 = darker,
+// 1.0 = unchanged) to fake directional light across a cube's three
+// visible faces. Values are clamped so this never over/underflows.
+function shadeColor(hex, factor) {
+  const r = Math.round(Math.min(255, parseInt(hex.slice(1, 3), 16) * factor));
+  const g = Math.round(Math.min(255, parseInt(hex.slice(3, 5), 16) * factor));
+  const b = Math.round(Math.min(255, parseInt(hex.slice(5, 7), 16) * factor));
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+// Draws one piece as a full cube: a top face (lit brightest, as if
+// from directly above) plus left and right side faces (progressively
+// darker, to sell the 3D shape). All three faces share the same
+// base color, just shaded differently.
 function drawTile(x, y, z, piece) {
   const { screenX, screenY } = toIsoUnscaled(x, y, z);
-  const color = PIECE_COLORS[piece.type] || '#ff00ff';
+  const typeInfo = PIECE_TYPES[piece.type];
+  const base = typeInfo ? typeInfo.color : '#ff00ff';
 
-  ctx.beginPath();
-  ctx.moveTo(screenX, screenY - TILE_HEIGHT / 2);
-  ctx.lineTo(screenX + TILE_WIDTH / 2, screenY);
-  ctx.lineTo(screenX, screenY + TILE_HEIGHT / 2);
-  ctx.lineTo(screenX - TILE_WIDTH / 2, screenY);
-  ctx.closePath();
+  // Top face's four corners (N, E, S, W) and their counterparts one
+  // tile-depth lower, which form the bottom edge of the side faces.
+  const nTop = { x: screenX, y: screenY - TILE_HEIGHT / 2 };
+  const eTop = { x: screenX + TILE_WIDTH / 2, y: screenY };
+  const sTop = { x: screenX, y: screenY + TILE_HEIGHT / 2 };
+  const wTop = { x: screenX - TILE_WIDTH / 2, y: screenY };
+  const eBottom = { x: eTop.x, y: eTop.y + TILE_DEPTH };
+  const sBottom = { x: sTop.x, y: sTop.y + TILE_DEPTH };
+  const wBottom = { x: wTop.x, y: wTop.y + TILE_DEPTH };
 
-  ctx.fillStyle = color;
-  ctx.fill();
   ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+
+  // Left face: W -> S -> S(bottom) -> W(bottom)
+  ctx.beginPath();
+  ctx.moveTo(wTop.x, wTop.y);
+  ctx.lineTo(sTop.x, sTop.y);
+  ctx.lineTo(sBottom.x, sBottom.y);
+  ctx.lineTo(wBottom.x, wBottom.y);
+  ctx.closePath();
+  ctx.fillStyle = shadeColor(base, 0.55);
+  ctx.fill();
+  ctx.stroke();
+
+  // Right face: S -> E -> E(bottom) -> S(bottom)
+  ctx.beginPath();
+  ctx.moveTo(sTop.x, sTop.y);
+  ctx.lineTo(eTop.x, eTop.y);
+  ctx.lineTo(eBottom.x, eBottom.y);
+  ctx.lineTo(sBottom.x, sBottom.y);
+  ctx.closePath();
+  ctx.fillStyle = shadeColor(base, 0.75);
+  ctx.fill();
+  ctx.stroke();
+
+  // Top face: N -> E -> S -> W (drawn last so its edges sit cleanly
+  // over the tops of the side faces)
+  ctx.beginPath();
+  ctx.moveTo(nTop.x, nTop.y);
+  ctx.lineTo(eTop.x, eTop.y);
+  ctx.lineTo(sTop.x, sTop.y);
+  ctx.lineTo(wTop.x, wTop.y);
+  ctx.closePath();
+  ctx.fillStyle = shadeColor(base, 1.0);
+  ctx.fill();
   ctx.stroke();
 }
 
@@ -285,24 +333,4 @@ function makeDraggable(win, handle) {
     move(t.clientX, t.clientY);
   }, { passive: true });
   document.addEventListener('touchend', end);
-}
-
-// ---------------------------------------------------------------
-// TEMP: test grid, for verifying the renderer before gamespace.js
-// exists. Delete this function (and callers) once gamespace.js
-// provides real grid data.
-// ---------------------------------------------------------------
-export function generateTestGrid(size = 4) {
-  const types = ['stone', 'water', 'magma', 'air'];
-  const grid = [];
-  for (let x = 0; x < size; x++) {
-    grid[x] = [];
-    for (let y = 0; y < size; y++) {
-      grid[x][y] = [];
-      for (let z = 0; z < size; z++) {
-        grid[x][y][z] = { type: types[(x + y + z) % types.length], temperature: 20 };
-      }
-    }
-  }
-  return grid;
 }
