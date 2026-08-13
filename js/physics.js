@@ -1,22 +1,136 @@
 /* physics.js
-   Rules for inert matter: heat transfer, phase transitions,
-   gravity/density (later). Runs on tick, reads and mutates piece
-   state in the board grid.
+   Rules for inert matter. First slice: gravity as a piece-trade
+   (swap) — a denser piece swaps downward with whatever's below it,
+   repeatedly, until every column is sorted by density. This is
+   deliberately the simplest possible thing that exercises
+   timing.js's countdown machinery for real (many pieces, many
+   simultaneous pending countdowns, cancellations when a piece's
+   situation changes before its swap fires).
 
-   Exports (planned):
-     TODO — a per-tick update function (e.g. updatePhysics(board)):
-       walks the board (or registered pieces) and applies heat
-       transfer / phase transition rules
-     TODO — phase transition thresholds per piece type (e.g. water
-       boils above X, freezes below Y)
+   Fall speed is FLAT — every single-position swap takes the same
+   number of ticks (FALL_TICKS), regardless of density gap or
+   medium. No acceleration, no terminal velocity. That's a
+   deliberate simplification for this build; a realistic
+   accelerating model can replace FALL_TICKS later without changing
+   the swap/scheduling logic below.
 
-   Imports (planned):
-     from board.js — PIECE_TYPES, getPiece, setPiece (reads/writes
-       piece state, references type registry for thresholds)
-     from timing.js — registers countdowns for moves that resolve
-       over multiple ticks, rather than instantly
+   Density lives HERE, not in board.js's PIECE_TYPES — board.js is
+   frozen as-is per design-doc-v0.10. Density order (low -> high):
+   space < air < water < stone < magma. (Stone floats in magma but
+   sinks in water/air/space — decided per-sim, not meant to be
+   universally "realistic".)
 
-   Depends on: board.js (built), timing.js (stub — not yet built).
-   Cannot be meaningfully written until timing.js has real exports
-   to register against.
+   Exports:
+     DENSITY            — { typeName: number }, low = floats, high = sinks
+     createPhysicsState() — fresh state for tracking pending checks.
+       Pass this into every function below, same pattern as
+       timing.js's createTimer() — no module-level global state.
+     checkFall(state, board, timer, x, y, z)
+                         — compares the piece at (x,y,z) to the piece
+       below it. If denser, schedules a swap after FALL_TICKS ticks.
+       Cancels any previously pending check at this position first,
+       so a position is never watched by two countdowns at once.
+       Safe to call on any position at any time (e.g. after manually
+       editing the board) to re-settle it.
+     startGravity(state, board, timer)
+                         — scans the whole board once and calls
+       checkFall on every position. Call this once after filling a
+       board with pieces.
+
+   Imports:
+     from board.js  — getPiece, setPiece
+     from timing.js — registerCountdown, cancelCountdown
+
+   Depends on: board.js (built), timing.js (built).
 */
+
+import { getPiece, setPiece } from './board.js';
+import { registerCountdown, cancelCountdown } from './timing.js';
+
+export const DENSITY = {
+  space: 0,
+  air: 1,
+  water: 2,
+  stone: 3,
+  magma: 4
+};
+
+const FALL_TICKS = 5; // flat ticks per single-position fall swap
+
+function densityOf(piece) {
+  const d = DENSITY[piece.type];
+  return d === undefined ? 0 : d;
+}
+
+function posKey(x, y, z) {
+  return `${x},${y},${z}`;
+}
+
+/* createPhysicsState: fresh, independent tracking state. Holds one
+   pending-countdown id per position so a position is never checked
+   by more than one countdown racing at once. */
+export function createPhysicsState() {
+  return {
+    pendingByPos: new Map() // posKey -> countdown id
+  };
+}
+
+/* checkFall: compares the piece at (x,y,z) to the piece directly
+   below it. If the piece here is strictly denser, schedules a swap
+   FALL_TICKS from now. If it's not (stable, or already lighter),
+   any previously pending check here is simply cancelled and nothing
+   new is scheduled. */
+export function checkFall(state, board, timer, x, y, z) {
+  const key = posKey(x, y, z);
+  const existing = state.pendingByPos.get(key);
+  if (existing !== undefined) {
+    cancelCountdown(timer, existing);
+    state.pendingByPos.delete(key);
+  }
+
+  if (z === 0) return; // floor, nothing below to fall into
+
+  const here = getPiece(board, x, y, z);
+  const below = getPiece(board, x, y, z - 1);
+  if (!here || !below) return;
+  if (densityOf(here) <= densityOf(below)) return; // stable
+
+  const id = registerCountdown(timer, FALL_TICKS, () => {
+    state.pendingByPos.delete(key);
+    performSwap(state, board, timer, x, y, z);
+  });
+  state.pendingByPos.set(key, id);
+}
+
+/* performSwap: trades the piece at (x,y,z) with the piece below it,
+   then re-checks every position whose stability could have just
+   changed: the fallen piece's new spot, the pushed-up piece's new
+   spot, and whatever sits above that (its neighbor-below just
+   changed, so it might now be unstable too). */
+function performSwap(state, board, timer, x, y, z) {
+  const here = getPiece(board, x, y, z);
+  const below = getPiece(board, x, y, z - 1);
+  setPiece(board, x, y, z, below);
+  setPiece(board, x, y, z - 1, here);
+
+  checkFall(state, board, timer, x, y, z - 1); // fallen piece: might keep falling
+  checkFall(state, board, timer, x, y, z);     // pushed-up piece: might now be unstable
+
+  const sizeZ = board[0][0].length;
+  if (z + 1 < sizeZ) checkFall(state, board, timer, x, y, z + 1); // its neighbor above
+}
+
+/* startGravity: scans every position once and kicks off a fall
+   check wherever needed. Call this once after filling a board. */
+export function startGravity(state, board, timer) {
+  const sizeX = board.length;
+  const sizeY = board[0].length;
+  const sizeZ = board[0][0].length;
+  for (let x = 0; x < sizeX; x++) {
+    for (let y = 0; y < sizeY; y++) {
+      for (let z = 0; z < sizeZ; z++) {
+        checkFall(state, board, timer, x, y, z);
+      }
+    }
+  }
+}
