@@ -1,18 +1,26 @@
 /* main.js
-   Entry point. Creates the board and hands it to the renderer.
-   The only file that imports and coordinates all the others.
-
-   For now: an 8x8x8 board, every cell filled with 'stone', just
-   to confirm board.js -> render.js -> canvas all work together.
-   This is NOT the real starting state (the design doc calls for
-   filling with 'space' once physics.js/formation rules exist) —
-   it's a visible placeholder so the wiring can be checked by eye. */
-import { initRenderer, renderGrid, createWindow } from './render.js';
+   Entry point. Creates a real board (via board.js), fills it
+   randomly (via physics.js), starts gravity sorting it, and drives
+   real-time ticking + rendering so the sort is visible live.
+*/
+import { initRenderer, renderGrid } from './render.js';
 import { createBoard } from './board.js';
+import { createTimer, startRealtime } from './timing.js';
+import { createPhysicsState, startGravity, fillRandom } from './physics.js';
+
+const BOARD_SIZE = 8;
 
 initRenderer('board');
 
-const board = createBoard(8, 8, 8, 'stone');
-renderGrid(board);
+const board = createBoard(BOARD_SIZE, BOARD_SIZE, BOARD_SIZE, 'space');
+fillRandom(board);
 
-createWindow({ title: 'Test Window', content: '<p>It works.</p>' });
+const timer = createTimer();
+const physicsState = createPhysicsState();
+startGravity(physicsState, board, timer);
+
+renderGrid(board); // initial paint, before the first tick
+
+startRealtime(timer, () => {
+  renderGrid(board);
+});

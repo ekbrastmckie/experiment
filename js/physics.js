@@ -44,7 +44,7 @@
    Depends on: board.js (built), timing.js (built).
 */
 
-import { getPiece, setPiece } from './board.js';
+import { getPiece, setPiece, PIECE_TYPES } from './board.js';
 import { registerCountdown, cancelCountdown } from './timing.js';
 
 export const DENSITY = {
@@ -55,7 +55,27 @@ export const DENSITY = {
   magma: 4
 };
 
-const FALL_TICKS = 5; // flat ticks per single-position fall swap
+const FALL_TICKS = 20; // flat ticks per single-position fall swap
+
+const FILL_TYPES = ['space', 'air', 'water', 'stone', 'magma'];
+
+/* fillRandom: overwrites every position in the board with a random
+   pick from FILL_TYPES, roughly equal proportion (uniform random
+   per cell). Use this instead of board.js's createBoard fill for a
+   "let it sort itself out" demo. */
+export function fillRandom(board) {
+  const sizeX = board.length;
+  const sizeY = board[0].length;
+  const sizeZ = board[0][0].length;
+  for (let x = 0; x < sizeX; x++) {
+    for (let y = 0; y < sizeY; y++) {
+      for (let z = 0; z < sizeZ; z++) {
+        const type = FILL_TYPES[Math.floor(Math.random() * FILL_TYPES.length)];
+        setPiece(board, x, y, z, { type, temperature: PIECE_TYPES[type].temperature });
+      }
+    }
+  }
+}
 
 function densityOf(piece) {
   const d = DENSITY[piece.type];
