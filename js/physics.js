@@ -71,7 +71,7 @@ export function fillRandom(board) {
     for (let y = 0; y < sizeY; y++) {
       for (let z = 0; z < sizeZ; z++) {
         const type = FILL_TYPES[Math.floor(Math.random() * FILL_TYPES.length)];
-        setPiece(board, x, y, z, { type, temperature: PIECE_TYPES[type].temperature });
+        setPiece(board, x, y, z, { type, temperature: PIECE_TYPES[type].temperature, transp: PIECE_TYPES[type].transp });
       }
     }
   }

@@ -141,14 +141,15 @@ export function renderGrid(board) {
   ctx.restore();
 }
 
-// Multiplies a '#rrggbb' color by a brightness factor (e.g. 0.6 = darker,
+// Multiplies a '#rrggbb' color by a brightness factor (e.g. 0.6 = darker and adds transparency,
 // 1.0 = unchanged) to fake directional light across a cube's three
-// visible faces. Values are clamped so this never over/underflows.
-function shadeColor(hex, factor) {
-  const r = Math.round(Math.min(255, parseInt(hex.slice(1, 3), 16) * factor));
-  const g = Math.round(Math.min(255, parseInt(hex.slice(3, 5), 16) * factor));
-  const b = Math.round(Math.min(255, parseInt(hex.slice(5, 7), 16) * factor));
-  return `rgb(${r}, ${g}, ${b})`;
+// visible faces and make them transparent. Values are clamped so this never over/underflows.
+function shadeColor(hex, bright, clear) {
+  const r = Math.round(Math.min(255, parseInt(hex.slice(1, 3), 16) * bright));
+  const g = Math.round(Math.min(255, parseInt(hex.slice(3, 5), 16) * bright));
+  const b = Math.round(Math.min(255, parseInt(hex.slice(5, 7), 16) * bright));
+  const a = clear;
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
 
 // Draws one piece as a full cube: a top face (lit brightest, as if
@@ -159,6 +160,7 @@ function drawTile(x, y, z, piece) {
   const { screenX, screenY } = toIsoUnscaled(x, y, z);
   const typeInfo = PIECE_TYPES[piece.type];
   const base = typeInfo ? typeInfo.color : '#ff00ff';
+  const a = piece.transp;
 
   // Top face's four corners (N, E, S, W) and their counterparts one
   // tile-depth lower, which form the bottom edge of the side faces.
@@ -179,7 +181,7 @@ function drawTile(x, y, z, piece) {
   ctx.lineTo(sBottom.x, sBottom.y);
   ctx.lineTo(wBottom.x, wBottom.y);
   ctx.closePath();
-  ctx.fillStyle = shadeColor(base, 0.55);
+  ctx.fillStyle = shadeColor(base, 0.55,a);
   ctx.fill();
   ctx.stroke();
 
@@ -190,7 +192,7 @@ function drawTile(x, y, z, piece) {
   ctx.lineTo(eBottom.x, eBottom.y);
   ctx.lineTo(sBottom.x, sBottom.y);
   ctx.closePath();
-  ctx.fillStyle = shadeColor(base, 0.75);
+  ctx.fillStyle = shadeColor(base, 0.75,a);
   ctx.fill();
   ctx.stroke();
 
@@ -202,7 +204,7 @@ function drawTile(x, y, z, piece) {
   ctx.lineTo(sTop.x, sTop.y);
   ctx.lineTo(wTop.x, wTop.y);
   ctx.closePath();
-  ctx.fillStyle = shadeColor(base, 1.0);
+  ctx.fillStyle = shadeColor(base, 1.0,a);
   ctx.fill();
   ctx.stroke();
 }

@@ -30,15 +30,24 @@
 // thresholds).
 
 export const PIECE_TYPES = {
-  space: { color: '#000000', temperature: -273 }, // pre-formation emptiness
-  magma: { color: '#ff4500', temperature: 1200 },
-  stone: { color: '#808080', temperature: 20 },
-  ice:   { color: '#b3e5fc', temperature: -10 },
-  water: { color: '#1e90ff', temperature: 15 },
-  steam: { color: '#f5f5f5', temperature: 110 },
-  air:   { color: '#e0f7fa', temperature: 20 },
-  smoke: { color: '#616161', temperature: 60 },
-  fire:  { color: '#ff6f00', temperature: 600 }
+  space: { color: '#000000', temperature: -273,
+    transp: 0 }, // pre-formation emptiness
+  magma: { color: '#ff4500', temperature: 1200,
+    transp: 0.8 },
+  stone: { color: '#808080', temperature: 20,
+    transp: 1.0 },
+  ice:   { color: '#b3e5fc', temperature: -10,
+    transp: 0.6 },
+  water: { color: '#1e90ff', temperature: 15,
+    transp: 0.2 },
+  steam: { color: '#f5f5f5', temperature: 110,
+    transp: 0.3 },
+  air:   { color: '#e0f7fa', temperature: 20,
+    transp: 0 },
+  smoke: { color: '#616161', temperature: 60,
+    transp: 0.4 },
+  fire:  { color: '#ff6f00', temperature: 600,
+    transp: 0.3 }
 };
 
 export function isValidType(type) {
@@ -66,7 +75,9 @@ export function createBoard(sizeX, sizeY, sizeZ, fillType) {
       for (let z = 0; z < sizeZ; z++) {
         board[x][y][z] = {
           type: fillType,
-          temperature: PIECE_TYPES[fillType].temperature
+          temperature: PIECE_TYPES[fillType].temperature,
+          transp:
+            PIECE_TYPES[fillType].transp
         };
       }
     }
