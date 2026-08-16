@@ -6,7 +6,7 @@
 import { initRenderer, renderGrid } from './render.js';
 import { createBoard } from './board.js';
 import { createTimer, startRealtime } from './timing.js';
-import { createPhysicsState, startGravity, fillRandom } from './physics.js';
+import { createPhysicsState, startGravity, startHeat, fillRandom } from './physics.js';
 
 const BOARD_SIZE = 8;
 
@@ -18,6 +18,7 @@ fillRandom(board);
 const timer = createTimer();
 const physicsState = createPhysicsState();
 startGravity(physicsState, board, timer);
+startHeat(physicsState, board, timer);
 
 renderGrid(board); // initial paint, before the first tick
 
