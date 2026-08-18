@@ -1,53 +1,61 @@
-/* board.js
+/* board.js v0.16
+   Synced to: design-doc v0.11
+
    The grid itself, and the registry of what piece types exist.
-   Pure data — no rendering, no tick logic, no rules.
+   Pure data — no rendering, no tick logic, no rules. No imports.
+
+   Piece shape: { type, heat }
+   heat is computed at creation from the type's default temperature
+   and mass (heat = temperature * mass). Temperature is never
+   stored — derive it as heat / PIECE_TYPES[type].mass wherever
+   needed.
 
    Exports:
-     PIECE_TYPES        — registry object: { typeName: { color, temperature } }
+     PIECE_TYPES        — registry: { typeName: { color, temperature,
+                           mass, phase, momentum } }
      isValidType(type)  — bool, true if type exists in PIECE_TYPES
-     createBoard(sizeX, sizeY, sizeZ, fillType) — new 3D grid, every
-       cell filled with a piece of fillType. fillType is REQUIRED —
-       there is no default, since "every position is a piece" means
-       there's no safe type to assume on someone's behalf.
-     getPiece(board, x, y, z) — returns the piece at that position,
-       or null if the position is out of bounds.
-     setPiece(board, x, y, z, piece) — writes a piece at that position.
-       Returns true on success, false if out of bounds.
+     setBoard(sizeX, sizeY, sizeZ) — new 3D grid, semi-random layered
+       fill (see below). Every piece is { type, heat }.
+     getPiece(board, x, y, z) — piece at that position, or null if
+       out of bounds.
+     setPiece(board, x, y, z, piece) — writes a piece at that
+       position. Returns true on success, false if out of bounds.
 
-   Imports: none. This file has no dependencies on any other file.
-
-   Piece shape: { type, temperature }
-   (matches what render.js and physics.js already expect)
+   LAYER SCHEME (setBoard):
+   For each (x, y) column, bottom to top:
+     - magma: 1 or 2 cells, chosen randomly per column
+     - stone: 2 cells
+     - water: 2 cells
+     - air: fills the remainder up to sizeZ
+   If sizeZ is too small to fit magma+stone+water, the column is
+   truncated bottom-up in that same priority order and air is
+   skipped entirely.
 */
 
 // ---------------------------------------------------------------
 // Piece type registry
 // ---------------------------------------------------------------
-// color: used by render.js.
+// color: rgba string, used by render.js for all shading (top/side
+//   faces derive their shade from this at draw time).
 // temperature: default starting temperature for a freshly created
-// piece of this type, in arbitrary sim units (not real-world °C/°F —
-// exact scale to be decided when physics.js defines melting/freezing
-// thresholds).
+//   piece of this type, in arbitrary sim units.
+// mass: doubles as thermal mass in physics.js's
+//   heat math, and as the gravity comparison value.
+// phase: 'solid' | 'liquid' | 'gas' | 'none' (space only — not real
+//   matter, so it doesn't have a physical phase).
+// momentum: default starting momentum. Not yet consumed anywhere —
+//   added preemptively for force.js's planned momentum mechanic.
 
 export const PIECE_TYPES = {
-  space: { color: '#000000', temperature: -273,
-    transp: 0 }, // pre-formation emptiness
-  magma: { color: '#ff4500', temperature: 1200,
-    transp: 0.8 },
-  stone: { color: '#808080', temperature: 20,
-    transp: 1.0 },
-  ice:   { color: '#b3e5fc', temperature: -10,
-    transp: 0.6 },
-  water: { color: '#1e90ff', temperature: 15,
-    transp: 0.2 },
-  steam: { color: '#f5f5f5', temperature: 110,
-    transp: 0.3 },
-  air:   { color: '#e0f7fa', temperature: 20,
-    transp: 0 },
-  smoke: { color: '#616161', temperature: 60,
-    transp: 0.4 },
-  fire:  { color: '#ff6f00', temperature: 600,
-    transp: 0.3 }
+  space: { color: 'rgba(0,0,0,0)',         temperature: 0, mass: 0,  phase: 'none',   momentum: 0 },
+  magma: { color: 'rgba(255,69,0,0.8)',    temperature: 90,   mass: 30, phase: 'liquid', momentum: 0 },
+  stone: { color: 'rgba(128,128,128,1.0)', temperature: 3,    mass: 25, phase: 'solid',  momentum: 0 },
+  ice:   { color: 'rgba(179,229,252,0.6)', temperature: -10,  mass: 9,  phase: 'solid',  momentum: 0 },
+  water: { color: 'rgba(30,144,255,0.2)',  temperature: 3,    mass: 10, phase: 'liquid', momentum: 0 },
+  steam: { color: 'rgba(245,245,245,0.3)', temperature: 20,   mass: 1,  phase: 'gas',    momentum: 0 },
+  air:   { color: 'rgba(224,247,250,0.1)', temperature: 3,    mass: 2,  phase: 'gas',    momentum: 0 },
+  smoke: { color: 'rgba(97,97,97,0.5)',    temperature: 20,   mass: 1,  phase: 'gas',    momentum: 0 },
+  fire:  { color: 'rgba(255,111,0,0.4)',   temperature: 40,   mass: 1,  phase: 'gas',    momentum: 0 }
 };
 
 export function isValidType(type) {
@@ -58,27 +66,38 @@ export function isValidType(type) {
 // Grid creation and access
 // ---------------------------------------------------------------
 
-/* createBoard: builds a sizeX * sizeY * sizeZ grid, every cell
-   filled with { type: fillType, temperature: <that type's default> }.
-   fillType must be a valid registered type — no fallback default,
-   the caller must choose explicitly every time. */
-export function createBoard(sizeX, sizeY, sizeZ, fillType) {
-  if (!isValidType(fillType)) {
-    throw new Error(`createBoard: "${fillType}" is not a registered piece type`);
-  }
+function makePiece(type) {
+  const info = PIECE_TYPES[type];
+  return {
+    type,
+    heat: info.temperature * info.mass
+  };
+}
 
+/* columnLayers: builds the bottom-to-top type sequence for one
+   column, truncated to sizeZ if the column doesn't fully fit. */
+function columnLayers(sizeZ) {
+  const magmaCount = Math.random() < 0.5 ? 1 : 2;
+  const sequence = [];
+  for (let i = 0; i < magmaCount; i++) sequence.push('magma');
+  for (let i = 0; i < 2; i++) sequence.push('stone');
+  for (let i = 0; i < 2; i++) sequence.push('water');
+  while (sequence.length < sizeZ) sequence.push('air');
+  return sequence.slice(0, sizeZ);
+}
+
+/* setBoard: builds a sizeX * sizeY * sizeZ grid using the layered
+   landscape scheme described in the file header. This is the only
+   board-builder now — createBoard (v0.14 and earlier) is removed. */
+export function setBoard(sizeX, sizeY, sizeZ) {
   const board = [];
   for (let x = 0; x < sizeX; x++) {
     board[x] = [];
     for (let y = 0; y < sizeY; y++) {
+      const layers = columnLayers(sizeZ);
       board[x][y] = [];
       for (let z = 0; z < sizeZ; z++) {
-        board[x][y][z] = {
-          type: fillType,
-          temperature: PIECE_TYPES[fillType].temperature,
-          transp:
-            PIECE_TYPES[fillType].transp
-        };
+        board[x][y][z] = makePiece(layers[z]);
       }
     }
   }

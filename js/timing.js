@@ -1,4 +1,4 @@
-/* timing.js
+/* timing.js v0.14
    Generic tick/countdown engine. Deliberately piece-agnostic — knows
    nothing about pieces, only ticks and countdowns. Same engine drives
    real-time or turn-based modes depending on what calls tick().

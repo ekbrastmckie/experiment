@@ -1,27 +1,33 @@
-/* main.js
+/* main.js v0.16
    Entry point. Creates a real board (via board.js), fills it
    randomly (via physics.js), starts gravity sorting it, and drives
    real-time ticking + rendering so the sort is visible live.
 */
 import { initRenderer, renderGrid } from './render.js';
-import { createBoard } from './board.js';
-import { createTimer, startRealtime } from './timing.js';
-import { createPhysicsState, startGravity, startHeat, fillRandom } from './physics.js';
+import { setBoard } from './board.js';
+import { createTimer, tick } from './timing.js';
+import { createHeatState, seedHeat, startHeat, processDueHeat } from './heat.js';
+import { createForceState, startForce, processDueForce } from './force.js'
 
 const BOARD_SIZE = 8;
 
 initRenderer('board');
 
-const board = createBoard(BOARD_SIZE, BOARD_SIZE, BOARD_SIZE, 'space');
-fillRandom(board);
+const board = setBoard(BOARD_SIZE, BOARD_SIZE, BOARD_SIZE);
+seedHeat(board);
 
 const timer = createTimer();
-const physicsState = createPhysicsState();
-startGravity(physicsState, board, timer);
-startHeat(physicsState, board, timer);
+const heatState = createHeatState();
+const forceState = createForceState();
+startHeat(heatState, board, timer);
+startForce(forceState, board, timer);
 
-renderGrid(board); // initial paint, before the first tick
+renderGrid(board);
 
-startRealtime(timer, () => {
+setInterval(() => {
+  tick(timer);
+  processDueHeat(heatState, board, timer);
+  processDueForce(forceState, board, timer);
+  
   renderGrid(board);
-});
+}, 25);
